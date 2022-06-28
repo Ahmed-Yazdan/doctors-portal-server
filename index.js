@@ -1,15 +1,17 @@
 const express = require('express');
 const cors = require('cors');
+const fileUpload = require('express-fileupload')
 const { MongoClient } = require('mongodb');
 const ObjectId = require('mongodb').ObjectId;
 const admin = require("firebase-admin");
 require('dotenv').config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET)
 
 const app = express();
 const port = process.env.PORT || 5000;
 
 // Setting up firebase admin
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const serviceAccount = JSON.parse(`${process.env.FIREBASE_SERVICE_ACCOUNT}`);
 // require("./doctors-portal-firebase-adminsdk.json")
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
@@ -18,6 +20,7 @@ admin.initializeApp({
 // MiddleWare
 app.use(cors());
 app.use(express.json());
+app.use(fileUpload())
 
 
 //*********** DATABASE **************** */
@@ -47,6 +50,7 @@ const runDatabase = async () => {
         const database = client.db('doctors_portal');
         const appointmentsCollection = database.collection('appointments');
         const usersCollection = database.collection('users');
+        const doctorsCollection = database.collection('doctors');
 
         // GET ALL APPOINTMENTS WITH EMAIL AND DATE
         app.get('/appointments', verifyToken, async (req, res) => {
@@ -58,11 +62,57 @@ const runDatabase = async () => {
             res.json(appointments);
         });
 
+        // GET APPOINTMENT DATA BY ID FOR PAYMENT PAGE
+        app.get('/appointments/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await appointmentsCollection.findOne(query)
+            res.json(result)
+        })
+
         // SENDING A SINGLE APPOINTMENT TO DATABASE
         app.post('/appointments', async (req, res) => {
             const appointment = req.body;
             const result = await appointmentsCollection.insertOne(appointment)
             res.json(result);
+        });
+
+        // UPDATING APPOINTMETN AFTER PAYMENT
+        app.put('/appointments/:id', async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            const filter = { _id: new ObjectId(id) }
+            const updateDoc = {
+                $set: {
+                    payment: payment
+                }
+            }
+            const result = await appointmentsCollection.updateOne(filter, updateDoc)
+            res.json(result);
+        })
+
+        // ADDING DOCTOR TO DATABASE
+        app.post('/doctors', async(req, res) => {
+            const name = req.body.name;
+            const email = req.body.email;
+            const image = req.files.image;
+            const imageData = image.data;
+            const encodedImage = imageData.toString('base64');
+            const imageBuffer = Buffer.from(encodedImage, 'base64')
+            const doctor = {
+                name,
+                email,
+                image: imageBuffer
+            };
+            const result = await doctorsCollection.insertOne(doctor)
+            res.json(result);
+        })
+
+        // SHOWING DOCTOR AT CLIENT SIDE
+        app.get('/doctors', async(req, res) => {
+            const cursor = doctorsCollection.find({})
+            const doctors = await cursor.toArray();
+            res.json(doctors);
         });
 
         // SENDING USER INFO TO DATABASE
@@ -95,8 +145,8 @@ const runDatabase = async () => {
                     res.json(result);
                 };
             }
-            else{
-                res.status(403).json({message: 'You do not have access to make admin'});
+            else {
+                res.status(403).json({ message: 'You do not have access to make admin' });
             };
         });
 
@@ -111,7 +161,17 @@ const runDatabase = async () => {
             };
             res.json({ admin: isAdmin });
         })
-
+        app.post('/create-payment-intent', async (req, res) => {
+            const paymentInfo = req.body;
+            const amount = paymentInfo.price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                currency: 'usd',
+                amount: amount,
+                payment_method_types: ['card']
+            });
+            res.json({ paymentIntent: paymentIntent })
+            // clientSecret: paymentIntent.client_secret
+        })
 
     } finally {
         // DO nothing
@@ -132,4 +192,3 @@ app.get("/", (req, res) => {
 app.listen(port, () => {
     console.log('Running on port', port)
 });
-

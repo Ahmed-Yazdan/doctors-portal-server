@@ -15,7 +15,9 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.17.3",
+    "express-fileupload": "^1.4.0",
     "firebase-admin": "^10.0.2",
-    "mongodb": "^4.4.0"
+    "mongodb": "^4.4.0",
+    "stripe": "^9.10.0"
   }
 }
